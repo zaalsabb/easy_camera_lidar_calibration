@@ -1,0 +1,6 @@
+<launch>
+  <rosparam command="load" file="$(find easy_camera_lidar_calibration)/config/config.yaml" />
+
+  <node name="calibration" pkg="easy_camera_lidar_calibration" type="calibration.py" output="screen"/>
+
+</launch>
