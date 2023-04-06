@@ -1,12 +1,12 @@
 # Topic name in rosbag
-PointCloudTopic: "/livox/lidar" # PointCloud2 msg
+PointCloudTopic: "/livox/lidar_pc2" # PointCloud2 msg
 ImageTopic: "/intel/color/image_raw_10hz/compressed" # Image or CompressedImage msg
 
 # Filenames that will be saved
 common:
-    image_file: "/home/zaid/datasets/calibrations/22-07-21-calibration/processed3/0.jpg"
-    pcd_file: "/home/zaid/datasets/calibrations/22-07-21-calibration/processed3/0.pcd"
-    result_file: "/home/zaid/datasets/calibrations/22-07-21-calibration/processed3/extrinsic.txt"
+    image_file: "/home/zaid/datasets/calibration/0.jpg"
+    pcd_file: "/home/zaid/datasets/calibration/0.pcd"
+    result_file: "/home/zaid/datasets/calibration/extrinsic.txt"
 
 # Camera Parameters. Adjust them!
 camera:
@@ -14,3 +14,6 @@ camera:
     dist_coeffs: [-0.05449240654706955, 0.06359218806028366, 0.00016181448881980032, -0.0009868403431028128, -0.02028072439134121]     # camera distortion coefficients
     panorama: false      # set if image is panorama (optional)
     fov: 70             # fov to use for panorama image (optional)
+    
+parameters:
+    reprojectionError: 3 # used for the ransac solver

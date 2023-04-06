@@ -3,5 +3,6 @@
   <param name="use_sim_time" value="true"/>
 
   <node name="lidar2pcd" pkg="easy_camera_lidar_calibration" type="lidar2pcd" output="screen"/>
+  <node name="to_pc2" pkg="easy_camera_lidar_calibration" type="to_pointcloud2" output="screen"/>
 
 </launch>

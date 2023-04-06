@@ -1,0 +1,3 @@
+<launch>
+  <node name="to_pc2" pkg="mapping_kit" type="to_pointcloud2" output="screen"/>
+</launch>

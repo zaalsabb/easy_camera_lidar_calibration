@@ -8,6 +8,7 @@ import Equirec2Perspec as E2P
 import rospy
 from geometry_msgs.msg import PoseStamped
 from scipy.spatial.transform import Rotation    
+from render_depthmap import *
 
 class Node():
     def __init__(self):
@@ -22,6 +23,8 @@ class Node():
         self.d = rospy.get_param('camera/dist_coeffs')
         self.panorama = rospy.get_param('camera/panorama',default=False)
         self.fov  = rospy.get_param('camera/fov',default=60)
+        
+        self.reprojectionError = rospy.get_param('parameters/reprojectionError',default=5)
 
         self.img = cv2.imread(self.f_img)
         self.pcd = o3d.io.read_point_cloud(self.f_pcd)
@@ -32,6 +35,7 @@ class Node():
             self.fun_rectify_views()
 
         self.init_calibration()
+        # self.check_pose_estimation()
 
     def pick_3d_points(self):
         print("")
@@ -48,16 +52,56 @@ class Node():
         print("")
         return np.asarray(self.pcd.points)[vis.get_picked_points()]   
 
-    def pick_2d_points(self):
-         
-        pt_size = 2
+    def pick_3d_points2(self):
+
+        K = np.array(self.K).reshape(3,3)
+        I2 = cv2.imread(self.f_img)
+        w = I2.shape[1]
+        h = I2.shape[0]
+        T_cam_lidar = pose2matrix([0,0,0,-0.5,0.5,-0.5,0.5])              
+        I2_pcd = project_to_image(self.pcd, T_cam_lidar, K, w, h)
+
+        pt_size = 5
         img_coords=[]
 
         def interactive_win(event, u, v, flags, param):
             if event == cv2.EVENT_LBUTTONDOWN:
                 img_coords.append([u,v])
                 print('Picked 2D Points: {}, {}'.format(u,v))
-                cv2.circle(self.img, (u, v), int(5*pt_size), (255, 0, 0), -1)       
+                cv2.circle(I2_pcd, (u, v), int(pt_size), (255, 0, 0), -1)       
+
+
+        cv2.namedWindow('image', cv2.WINDOW_NORMAL)
+        cv2.setMouseCallback('image', interactive_win)
+
+        while (1):
+            cv2.imshow('image', I2_pcd)
+            k = cv2.waitKey(20) & 0xFF
+            if k == 27:  # 'Esc' Key
+                break
+            elif k == 13:  # 'Enter' Key
+                break
+            elif k == ord('q'):  # 'q' Key
+                break        
+
+        pts_2d = np.array(img_coords).T
+
+        D = cloud_to_depth(self.pcd, K, T_cam_lidar, w, h)        
+
+        pts_3d = project_2d_to_3d(pts_2d, D, K, T_cam_lidar, w, h)   
+
+        return pts_3d.T
+
+    def pick_2d_points(self):
+         
+        pt_size = 5
+        img_coords=[]
+
+        def interactive_win(event, u, v, flags, param):
+            if event == cv2.EVENT_LBUTTONDOWN:
+                img_coords.append([u,v])
+                print('Picked 2D Points: {}, {}'.format(u,v))
+                cv2.circle(self.img, (u, v), int(pt_size), (255, 0, 0), -1)       
 
 
         cv2.namedWindow('image', cv2.WINDOW_NORMAL)
@@ -108,7 +152,7 @@ class Node():
 
     def init_calibration(self):
         
-        pts_3D = self.pick_3d_points()
+        pts_3D = self.pick_3d_points2()
         pts_2D = self.pick_2d_points()
 
         K=np.array(self.K,dtype=np.float32).reshape(3,3)
@@ -117,48 +161,91 @@ class Node():
         pts_3D=np.array(pts_3D,dtype=np.float32)
         pts_2D=np.array(pts_2D,dtype=np.float32)
 
-        _,rvecs,tvecs,inliers=cv2.solvePnPRansac(pts_3D, pts_2D, K, d,flags=cv2.SOLVEPNP_P3P)
+        _,rvecs,tvecs,inliers=cv2.solvePnPRansac(pts_3D, pts_2D, K, d,flags=cv2.SOLVEPNP_P3P, reprojectionError=self.reprojectionError)
 
-        R_ = cv2.Rodrigues(rvecs)[0]
-        R = R_.T
-        C = -R_.T.dot(tvecs)  
-
-        T_lidar_cam = np.eye(4)
-        T_lidar_cam[:3,:3] = R.T
-        T_lidar_cam[:3,3] = -R.T.dot(C).reshape(-1)    
+        T_lidar_cam = vecs2mat(tvecs,rvecs)
+        T_cam_lidar = np.linalg.inv(T_lidar_cam)
         
-        np.savetxt(self.f_out,T_lidar_cam,delimiter=',')
+        np.savetxt(self.f_out,T_cam_lidar,delimiter=',')
 
-        print('\nComputing Transformation From Camera To Lidar..')
+        print('\nComputing Transformation From Lidar To Camera..')
         print('Number of inlier points:{}'.format(len(inliers)))
         print('Saved to {}\n'.format(self.f_out))
-        print(T_lidar_cam)
+        print(T_cam_lidar)
 
-        # t = T_lidar_cam[:3,3]
-        # R = T_lidar_cam[:3,:3]        
-        # q = Rotation.from_matrix(R).as_quat()
+        self.check_pose_estimation()
+      
+    # def refine_calibration(self):
+    #     K = np.array(self.K).reshape(3,3)
+    #     I2 = cv2.imread(self.f_img)
+    #     w = I2.shape[1]
+    #     h = I2.shape[0]
+    #     T_cam_lidar = np.loadtxt(self.f_out, delimiter=',')        
 
-        # rvecs = cv2.Rodrigues(R)[0]
+    #     D = cloud_to_depth(self.pcd, K, T_cam_lidar, w, h)        
 
-        # msg = PoseStamped()
-        # msg.pose.position.x = t[0]
-        # msg.pose.position.y = t[1]
-        # msg.pose.position.z = t[2]
+    #     pts_3d = project_2d_to_3d(pts_2d, D, K, T_cam_lidar, w, h)
 
-        # msg.pose.orientation.x = q[0]
-        # msg.pose.orientation.y = q[1]
-        # msg.pose.orientation.z = q[2]
-        # msg.pose.orientation.w = q[3]
+    def check_pose_estimation(self):
+        
+        K = np.array(self.K).reshape(3,3)
+        I2 = cv2.imread(self.f_img)
+        T_cam_lidar = np.loadtxt(self.f_out, delimiter=',')        
 
-        # self.pub.publish(msg)
+        I2_pcd = project_to_image(self.pcd, T_cam_lidar, K, I2.shape[1], I2.shape[0])
+
+        alpha_slider_max = 100
+        title_window = 'Linear Blend'
+        def on_trackbar(val):
+            alpha = val / alpha_slider_max
+            beta = ( 1.0 - alpha )
+            dst = cv2.addWeighted(I2_pcd, alpha, I2, beta, 0.0)
+            r = 0.5
+            dst = cv2.resize(dst, (int(dst.shape[1]*r), int(dst.shape[0] * r)))
+            cv2.imshow(title_window, dst)
+
+        cv2.namedWindow(title_window)
+        trackbar_name = 'Alpha x %d' % alpha_slider_max
+        cv2.createTrackbar(trackbar_name, title_window , 0, alpha_slider_max, on_trackbar)
+        # Show some stuff
+        on_trackbar(0)
+        on_trackbar(50)
+        on_trackbar(100)
+        # Wait until user press some key
+        cv2.waitKey() 
+
+
+def project_to_image(pcd,T_c1_m1,K,w,h):
+
+    vis = VisOpen3D(width=w, height=h, visible=False)
+    pcd = pcd.voxel_down_sample(0.01)
+    vis.add_geometry(pcd)
+
+    vis.update_view_point(K, T_c1_m1)
+
+    img = vis.capture_screen_float_buffer(show=False)
+    img = np.uint8(255*np.array(img))
+    img = np.dstack([img[:,:,2],img[:,:,1],img[:,:,0]])
     
-        # # check calibration
-        # pts3d = np.asarray(self.pcd.points)
-        # pts3d = np.array(pts3d,dtype=np.float32).reshape(-1,1)
+    cx = K[0,2]
+    cy = K[1,2]
+    tx = cx-w/2
+    ty = cy-h/2
+    M = np.array([[1,0,tx],
+                  [0,1,ty]])
+    img = cv2.warpAffine(img,M,(img.shape[1],img.shape[0]))
 
-        # pts2d = cv2.projectPoints(pts3d,rvecs,t,K,d)
-        # pass
-            
+    return img  
+
+def vecs2mat(tvecs,rvecs):
+    R_ = cv2.Rodrigues(rvecs)[0]
+    R = R_.T
+    C = -R_.T.dot(tvecs)
+    T_m1_c2 = np.eye(4)
+    T_m1_c2[:3, :3] = R
+    T_m1_c2[:3, 3] = C.reshape(-1) 
+
+    return T_m1_c2   
 
 if __name__ == '__main__':
     Node()

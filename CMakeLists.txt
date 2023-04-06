@@ -15,6 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   std_msgs
   tf2_ros
+  livox_ros_driver
 )
 
 
@@ -31,8 +32,12 @@ include_directories(
 )
 
 add_executable(lidar2pcd src/lidar2pcd.cpp)
+add_executable(to_pointcloud2 src/to_pointcloud2.cpp)
 
 target_link_libraries(lidar2pcd 
   ${catkin_LIBRARIES} ${OpenCV_LIBS} #${PCL_LIBRARIES}  ${CERES_LIBRARIES}
+)
+target_link_libraries(to_pointcloud2 
+  ${catkin_LIBRARIES}
 )
 
